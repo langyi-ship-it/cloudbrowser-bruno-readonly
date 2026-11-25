@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Inspect example Cloudbrowser usage snapshots and distinguish a concurrency limit from a billing block.">
+<title>Inspect a browser capacity snapshot</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#1a2a39;background:#f0f4f9}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0}
+main{max-width:780px;margin:auto;padding:clamp(1rem,5vw,2.5rem)}
+h1{font-size:clamp(1.55rem,5vw,2.4rem);margin:0}
+p{line-height:1.55}
+label{display:block;margin:.8rem 0 .36rem;font-weight:650}
+select,textarea,button{font:inherit;border:1px solid #647c91;border-radius:6px;padding:.55rem;color:inherit;background:white}
+select{max-width:100%}
+textarea{display:block;width:100%;min-height:9.2rem;resize:vertical;font:normal .94rem ui-monospace,monospace;line-height:1.45}
+button{margin-top:.6rem;color:white;background:#1b5291;border-color:#1b5291;font-weight:650;cursor:pointer}
+section{margin:1rem 0;border:1px solid #c0d0df;background:white;border-radius:8px;padding:1rem}
+h2{font-size:1.2rem;margin:0}
+dl{display:grid;grid-template-columns:1fr auto;gap:.45rem .8rem;margin:.8rem 0 0}
+dt,dd{margin:0}
+dd{font-variant-numeric:tabular-nums;text-align:right;font-weight:650}
+a{color:#174c82}
+:focus-visible{outline:3px solid #1b66b4;outline-offset:3px}
+</style>
+</head>
+<body>
+<main>
+<h1>Inspect a browser capacity snapshot</h1>
+<p>Use a sample or paste a redacted response from <code>GET /usage</code>. The page evaluates JSON locally and needs no workspace key.</p>
+<form id="inspect">
+<label for="scenario">Example response</label>
+<select id="scenario">
+<option value="open">Open slots</option>
+<option value="full">Concurrency limit reached</option>
+<option value="blocked">Free allowance exhausted</option>
+<option value="overage">Paid plan with no included time left</option>
+</select>
+<label for="payload">Usage response</label>
+<textarea id="payload" spellcheck="false" autocomplete="off"></textarea>
+<button type="submit">Inspect snapshot</button>
+</form>
+<section aria-live="polite" aria-labelledby="result-title">
+<h2 id="result-title"></h2>
+<p id="detail" hidden></p>
+<dl id="figures">
+<dt>Occupied or reserved slots</dt><dd id="used"></dd>
+<dt>Open slots at read time</dt><dd id="open"></dd>
+<dt>Included seconds remaining</dt><dd id="remaining"></dd>
+</dl>
+</section>
+<p>A usage snapshot can change before an operation reserves capacity. See the <a href="https://cloudbrowser.tv/docs/billing" target="_blank" rel="noopener noreferrer">Cloudbrowser usage and billing reference</a> for the rules behind the response.</p>
+<p><a href="https://github.com/langyi-ship-it/cloudbrowser-bruno-readonly">Open the Bruno collection</a> to request a snapshot in your own workspace.</p>
+</main>
+<script>
+const usageFields = ["runningBrowsers", "concurrencyLimit", "remainingSeconds"];
+
+function summarizeUsage(snapshot) {
+  if (!snapshot || usageFields.some(
+    (name) => !Number.isSafeInteger(snapshot[name]) || snapshot[name] < 0
+  ) || !Object.hasOwn(snapshot, "computeBlock") ||
+    (snapshot.computeBlock !== null && (typeof snapshot.computeBlock !== "object" ||
+     typeof snapshot.computeBlock.code !== "string"))
+  ) {
+    throw new Error("Unexpected Cloudbrowser usage response.");
+  }
+
+  const openSlots = Math.max(0, snapshot.concurrencyLimit - snapshot.runningBrowsers);
+  const billingBlock = snapshot.computeBlock;
+  return {
+    plan: snapshot.plan,
+    occupiedOrReservedSlots: snapshot.runningBrowsers,
+    openSlotsAtReadTime: openSlots,
+    remainingSeconds: snapshot.remainingSeconds,
+    outcome: billingBlock ? "billing-block" : openSlots === 0 ? "no-open-slots" : "open-slot-observed",
+    blockedReason: billingBlock?.code ?? null,
+    observedAt: new Date().toISOString()
+  };
+}
+
+const sample = {
+  plan: "basic", runningBrowsers: 2, concurrencyLimit: 10,
+  remainingSeconds: 9000, computeBlock: null
+};
+
+
+const scenarios = {
+  open: sample,
+  full: { ...sample, runningBrowsers: 10 },
+  blocked: { plan: "free", runningBrowsers: 0, concurrencyLimit: 1, remainingSeconds: 0,
+    computeBlock: { code: "free_allowance_exhausted" } },
+  overage: { ...sample, remainingSeconds: 0 }
+};
+const headings = {
+  "billing-block": "The snapshot reports a billing block",
+  "no-open-slots": "No open slots in this snapshot",
+  "open-slot-observed": "The snapshot shows open slots"
+};
+const scenario = document.querySelector("#scenario");
+const payload = document.querySelector("#payload");
+const title = document.querySelector("#result-title");
+const detail = document.querySelector("#detail");
+const figures = document.querySelector("#figures");
+const format = new Intl.NumberFormat("en-US");
+
+function inspect() {
+  let snapshot;
+  try {
+    snapshot = summarizeUsage(JSON.parse(payload.value));
+  } catch {
+    title.textContent = "Enter a valid usage snapshot";
+    detail.textContent = "Include runningBrowsers, concurrencyLimit, remainingSeconds, and computeBlock.";
+    detail.hidden = false;
+    figures.hidden = true;
+    return;
+  }
+  title.textContent = headings[snapshot.outcome];
+  detail.textContent = snapshot.blockedReason ? "Reported reason: " + snapshot.blockedReason : "";
+  detail.hidden = !snapshot.blockedReason;
+  figures.hidden = false;
+  document.querySelector("#used").textContent = format.format(snapshot.occupiedOrReservedSlots);
+  document.querySelector("#open").textContent = format.format(snapshot.openSlotsAtReadTime);
+  document.querySelector("#remaining").textContent = format.format(snapshot.remainingSeconds);
+}
+function selectSample() {
+  payload.value = JSON.stringify(scenarios[scenario.value], null, 2);
+  inspect();
+}
+scenario.addEventListener("change", selectSample);
+document.querySelector("#inspect").addEventListener("submit", (event) => {
+  event.preventDefault();
+  inspect();
+});
+selectSample();
+</script>
+</body>
+</html>
