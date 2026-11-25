@@ -1,0 +1,19 @@
+meta {
+  name: Read the workspace usage snapshot
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{cloudbrowser_base_url}}/usage
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{cloudbrowser_api_key}}
+}
+
+docs {
+  Inspect the workspace usage and concurrency returned by the API before a parallel job. The response is a snapshot, so capacity can change before work starts.
+}

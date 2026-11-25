@@ -1,0 +1,19 @@
+meta {
+  name: List workspace browsers
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{cloudbrowser_base_url}}/browsers
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{cloudbrowser_api_key}}
+}
+
+docs {
+  Check which browsers the selected workspace can access. Use a workspace API key saved as a local secret variable.
+}
